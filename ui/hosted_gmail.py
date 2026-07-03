@@ -12,7 +12,14 @@ from gmail_client.web_oauth import (
     exchange_code_for_credentials,
     hosted_oauth_configured,
 )
-from storage.database import get_or_create_user, list_gmail_accounts
+from storage.database import (
+    count_user_data,
+    delete_user_and_all_data,
+    delete_user_gmail_credentials,
+    delete_user_scanned_data,
+    get_or_create_user,
+    list_gmail_accounts,
+)
 
 
 def _get_query_param(name: str) -> str | None:
@@ -120,13 +127,64 @@ def render_hosted_login_gate() -> int | None:
     return None
 
 
+
+def render_privacy_controls(user_id: int) -> None:
+    """Simple alpha-only controls to delete data stored by this app."""
+    with st.expander("Privacy / delete my alpha data"):
+        counts = count_user_data(user_id)
+        st.write("Currently stored for this profile:")
+        st.write(
+            {
+                "extracted_admin_items": counts["admin_items"],
+                "saved_email_metadata_records": counts["email_sources"],
+                "saved_gmail_connections": counts["gmail_accounts"],
+            }
+        )
+        st.caption(
+            "This deletes data stored by this alpha app. It does not delete or change anything inside Gmail. "
+            "To fully revoke Google permission as well, remove the app from your Google Account third-party access settings."
+        )
+
+        confirm_delete_scans = st.checkbox(
+            "I understand: delete extracted admin items and saved email metadata for this profile",
+            key=f"confirm_delete_scans_{user_id}",
+        )
+        if st.button("Delete scanned admin data", disabled=not confirm_delete_scans):
+            delete_user_scanned_data(user_id)
+            st.success("Deleted extracted admin items and saved email metadata for this profile.")
+            st.rerun()
+
+        confirm_disconnect = st.checkbox(
+            "I understand: delete the saved Gmail token/connection for this profile",
+            key=f"confirm_disconnect_{user_id}",
+        )
+        if st.button("Disconnect Gmail and delete saved token", disabled=not confirm_disconnect):
+            delete_user_gmail_credentials(user_id)
+            st.session_state.pop("hosted_user_id", None)
+            st.session_state.pop("hosted_gmail_address", None)
+            st.success("Deleted the saved Gmail connection token from this alpha app.")
+            st.rerun()
+
+        confirm_delete_all = st.checkbox(
+            "I understand: delete this profile and all alpha data stored for it",
+            key=f"confirm_delete_all_{user_id}",
+        )
+        if st.button("Delete this profile and all stored app data", disabled=not confirm_delete_all):
+            delete_user_and_all_data(user_id)
+            st.session_state.pop("hosted_user_id", None)
+            st.session_state.pop("hosted_gmail_address", None)
+            st.success("Deleted this profile and all app-stored alpha data for it.")
+            st.rerun()
+
+
 def render_hosted_gmail_scan(user_id: int) -> None:
     st.header("Gmail scan")
 
     stored = load_credentials_for_user(user_id, refresh_if_needed=True)
     if stored is None:
         st.warning("No saved Gmail credentials found. Reconnect Gmail from the landing page.")
-        if st.button("Reset connection"):
+        render_privacy_controls(user_id)
+        if st.button("Reset browser session"):
             st.session_state.pop("hosted_user_id", None)
             st.session_state.pop("hosted_gmail_address", None)
             st.rerun()
@@ -185,7 +243,10 @@ def render_hosted_gmail_scan(user_id: int) -> None:
                     st.write(error)
 
     st.divider()
-    if st.button("Disconnect this browser session"):
+    render_privacy_controls(user_id)
+
+    st.divider()
+    if st.button("Disconnect this browser session only"):
         st.session_state.pop("hosted_user_id", None)
         st.session_state.pop("hosted_gmail_address", None)
         st.rerun()
