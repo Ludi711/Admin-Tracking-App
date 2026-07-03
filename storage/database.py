@@ -327,3 +327,48 @@ def update_admin_item_fields(item_id: int, fields: dict) -> None:
             f"UPDATE admin_items SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             values,
         )
+
+
+
+def count_user_data(user_id: int) -> dict:
+    """Return simple counts for the connected alpha profile."""
+    with db_session() as conn:
+        admin_items = conn.execute(
+            "SELECT COUNT(*) AS n FROM admin_items WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        email_sources = conn.execute(
+            "SELECT COUNT(*) AS n FROM email_sources WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        gmail_accounts = conn.execute(
+            "SELECT COUNT(*) AS n FROM gmail_accounts WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        return {
+            "admin_items": int(admin_items),
+            "email_sources": int(email_sources),
+            "gmail_accounts": int(gmail_accounts),
+        }
+
+
+def delete_user_scanned_data(user_id: int) -> None:
+    """Delete extracted admin items and saved email metadata/snippets for one alpha profile."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM admin_items WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM email_sources WHERE user_id = ?", (user_id,))
+
+
+def delete_user_gmail_credentials(user_id: int) -> None:
+    """Delete saved Gmail OAuth credentials/tokens for one alpha profile."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM gmail_accounts WHERE user_id = ?", (user_id,))
+
+
+def delete_user_and_all_data(user_id: int) -> None:
+    """Delete the alpha profile and all app-stored data for that profile."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM admin_items WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM email_sources WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM gmail_accounts WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
