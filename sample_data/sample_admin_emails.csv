@@ -1,0 +1,5 @@
+sender,subject,date,snippet,body
+Admiral <renewals@example.com>,Your car insurance renewal is due,2026-06-28,"Your policy renewal is due on 12 July 2026. The new annual price is £612.45.","Please review your renewal before 12 July 2026. Amount due: £612.45."
+Energy Co <billing@example.com>,Your latest energy bill,2026-06-29,"Your bill is ready. Payment due by 20 July 2026. Amount £84.20.","Your energy statement is now available. Please pay £84.20 by 20 July 2026."
+Cinema Club <hello@example.com>,Your membership is renewing soon,2026-06-30,"Your subscription renews on 04/08/2026 for £12.99.","Your membership plan renews on 04/08/2026."
+Random Newsletter <news@example.com>,Here are some articles you might like,2026-07-01,"Weekly digest of links.","No action required."
