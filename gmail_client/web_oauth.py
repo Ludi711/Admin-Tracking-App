@@ -48,12 +48,6 @@ def _unb64url(value: str) -> bytes:
 
 
 def create_signed_state(*, next_path: str = "/") -> str:
-    """Create a signed state token for the OAuth redirect.
-
-    This keeps the hosted Streamlit proof simple while still protecting the
-    callback against casual tampering. It is not intended to replace a full
-    production session store.
-    """
     payload = {
         "iat": int(time.time()),
         "nonce": _b64url(hashlib.sha256(str(time.time()).encode()).digest())[:24],
@@ -89,12 +83,13 @@ def verify_signed_state(state: str, *, max_age_seconds: int = 15 * 60) -> dict[s
     return payload
 
 
-def build_authorization_url() -> str:
-    """Return a Google consent URL for Gmail read-only access."""
+def build_authorization_url() -> tuple[str, str | None]:
+    """Return (Google consent URL, PKCE code verifier)."""
     flow = Flow.from_client_config(
         _client_config(),
         scopes=GMAIL_SCOPES,
         redirect_uri=GOOGLE_REDIRECT_URI,
+        autogenerate_code_verifier=True,
     )
     auth_url, _ = flow.authorization_url(
         access_type="offline",
@@ -102,16 +97,19 @@ def build_authorization_url() -> str:
         prompt="consent",
         state=create_signed_state(),
     )
-    return auth_url
+    return auth_url, getattr(flow, "code_verifier", None)
 
 
-def exchange_code_for_credentials(*, code: str, state: str):
+def exchange_code_for_credentials(*, code: str, state: str, code_verifier: str | None = None):
     """Validate OAuth state, exchange authorization code, and return credentials."""
     verify_signed_state(state)
-    flow = Flow.from_client_config(
-        _client_config(),
-        scopes=GMAIL_SCOPES,
-        redirect_uri=GOOGLE_REDIRECT_URI,
-    )
+    kwargs = {
+        "scopes": GMAIL_SCOPES,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+    }
+    if code_verifier:
+        kwargs["code_verifier"] = code_verifier
+
+    flow = Flow.from_client_config(_client_config(), **kwargs)
     flow.fetch_token(code=code)
     return flow.credentials
