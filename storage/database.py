@@ -28,6 +28,15 @@ def db_session(db_path: Path | str = DB_PATH) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, ddl: str) -> None:
+    if column_name not in _table_columns(conn, table_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     with db_session() as conn:
         conn.executescript(
@@ -88,6 +97,22 @@ def init_db() -> None:
             """
         )
 
+        # Lightweight migrations for existing alpha databases.
+        _add_column_if_missing(conn, "gmail_accounts", "credentials_json_encrypted", "credentials_json_encrypted TEXT")
+        _add_column_if_missing(conn, "gmail_accounts", "token_storage_mode", "token_storage_mode TEXT DEFAULT 'plain_local_alpha'")
+        _add_column_if_missing(conn, "gmail_accounts", "last_sync_at", "last_sync_at TEXT")
+        _add_column_if_missing(conn, "gmail_accounts", "updated_at", "updated_at TEXT DEFAULT CURRENT_TIMESTAMP")
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_items_user_status ON admin_items(user_id, status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_items_user_message ON admin_items(user_id, gmail_message_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_email_sources_user_message ON email_sources(user_id, gmail_message_id)"
+        )
+
 
 def get_or_create_user(email: str, display_name: Optional[str] = None) -> int:
     email = email.strip().lower()
@@ -108,6 +133,90 @@ def list_users() -> list[dict]:
     with db_session() as conn:
         rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]
+
+
+def get_user(user_id: int) -> dict | None:
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def upsert_gmail_account(
+    *,
+    user_id: int,
+    gmail_address: str,
+    credentials_json_encrypted: str,
+    token_expiry: str | None,
+    token_storage_mode: str,
+) -> int:
+    gmail_address = gmail_address.strip().lower()
+    with db_session() as conn:
+        existing = conn.execute(
+            "SELECT id FROM gmail_accounts WHERE user_id = ? AND gmail_address = ?",
+            (user_id, gmail_address),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE gmail_accounts
+                SET credentials_json_encrypted = ?, token_expiry = ?, token_storage_mode = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (credentials_json_encrypted, token_expiry, token_storage_mode, existing["id"]),
+            )
+            return int(existing["id"])
+
+        cur = conn.execute(
+            """
+            INSERT INTO gmail_accounts
+                (user_id, gmail_address, credentials_json_encrypted, token_expiry, token_storage_mode)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, gmail_address, credentials_json_encrypted, token_expiry, token_storage_mode),
+        )
+        return int(cur.lastrowid)
+
+
+def list_gmail_accounts(user_id: int) -> list[dict]:
+    with db_session() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, gmail_address, token_expiry, token_storage_mode,
+                   last_sync_at, created_at, updated_at
+            FROM gmail_accounts
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_primary_gmail_account(user_id: int) -> dict | None:
+    with db_session() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM gmail_accounts
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_gmail_last_sync(account_id: int) -> None:
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE gmail_accounts SET last_sync_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (account_id,),
+        )
+
+
+def delete_gmail_account(account_id: int, user_id: int) -> None:
+    with db_session() as conn:
+        conn.execute("DELETE FROM gmail_accounts WHERE id = ? AND user_id = ?", (account_id, user_id))
 
 
 def insert_email_source(
@@ -139,6 +248,17 @@ def insert_email_source(
             (user_id, gmail_message_id, thread_id, sender, subject, received_at, snippet, source_type),
         )
         return int(cur.lastrowid)
+
+
+def admin_item_exists_for_message(user_id: int, gmail_message_id: str | None) -> bool:
+    if not gmail_message_id:
+        return False
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM admin_items WHERE user_id = ? AND gmail_message_id = ? LIMIT 1",
+            (user_id, gmail_message_id),
+        ).fetchone()
+        return row is not None
 
 
 def insert_admin_item(item: dict) -> int:
