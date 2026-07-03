@@ -44,29 +44,28 @@ def handle_hosted_oauth_callback() -> int | None:
         st.query_params.clear()
         return None
 
-    code_verifier = st.session_state.get("oauth_code_verifier")
+    try:
+        with st.spinner("Finishing Gmail connection..."):
+            creds = exchange_code_for_credentials(code=code, state=state)
+            service = build_gmail_service(creds)
+            profile = get_gmail_profile(service)
+            gmail_address = profile.get("emailAddress")
+            if not gmail_address:
+                raise RuntimeError("Could not determine the connected Gmail address.")
 
-    with st.spinner("Finishing Gmail connection..."):
-        creds = exchange_code_for_credentials(
-            code=code,
-            state=state,
-            code_verifier=code_verifier,
-        )
-        service = build_gmail_service(creds)
-        profile = get_gmail_profile(service)
-        gmail_address = profile.get("emailAddress")
-        if not gmail_address:
-            raise RuntimeError("Could not determine the connected Gmail address.")
+            user_id = get_or_create_user(email=gmail_address, display_name=gmail_address)
+            save_credentials_for_user(user_id=user_id, gmail_address=gmail_address, creds=creds)
 
-        user_id = get_or_create_user(email=gmail_address, display_name=gmail_address)
-        save_credentials_for_user(user_id=user_id, gmail_address=gmail_address, creds=creds)
-
-    st.session_state.pop("oauth_code_verifier", None)
-    st.session_state["hosted_user_id"] = user_id
-    st.session_state["hosted_gmail_address"] = gmail_address
-    st.query_params.clear()
-    st.success(f"Connected Gmail: {gmail_address}")
-    return user_id
+        st.session_state["hosted_user_id"] = user_id
+        st.session_state["hosted_gmail_address"] = gmail_address
+        st.query_params.clear()
+        st.success(f"Connected Gmail: {gmail_address}")
+        return user_id
+    except Exception as exc:
+        st.query_params.clear()
+        st.error(f"Gmail connection failed: {exc}")
+        st.info("Please click Connect Gmail again to start a fresh Google sign-in. Old callback codes can only be used once.")
+        return None
 
 
 def render_hosted_login_gate() -> int | None:
@@ -96,9 +95,7 @@ def render_hosted_login_gate() -> int | None:
         )
         return None
 
-    auth_url, code_verifier = build_authorization_url()
-    if code_verifier:
-        st.session_state["oauth_code_verifier"] = code_verifier
+    auth_url = build_authorization_url()
     st.link_button("Connect Gmail", auth_url, type="primary")
 
     with st.expander("What this alpha can and cannot do"):
@@ -132,7 +129,6 @@ def render_hosted_gmail_scan(user_id: int) -> None:
         if st.button("Reset connection"):
             st.session_state.pop("hosted_user_id", None)
             st.session_state.pop("hosted_gmail_address", None)
-            st.session_state.pop("oauth_code_verifier", None)
             st.rerun()
         return
 
@@ -192,5 +188,4 @@ def render_hosted_gmail_scan(user_id: int) -> None:
     if st.button("Disconnect this browser session"):
         st.session_state.pop("hosted_user_id", None)
         st.session_state.pop("hosted_gmail_address", None)
-        st.session_state.pop("oauth_code_verifier", None)
         st.rerun()
