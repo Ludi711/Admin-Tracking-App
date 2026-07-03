@@ -83,13 +83,18 @@ def verify_signed_state(state: str, *, max_age_seconds: int = 15 * 60) -> dict[s
     return payload
 
 
-def build_authorization_url() -> tuple[str, str | None]:
-    """Return (Google consent URL, PKCE code verifier)."""
+def build_authorization_url() -> str:
+    """Return the Google consent URL.
+
+    For this hosted alpha we intentionally do not use PKCE. This is a server-side
+    OAuth flow using a confidential Web Application client secret stored in
+    Streamlit secrets. Avoiding PKCE removes the Streamlit session-state problem
+    where the code verifier can be lost after redirect.
+    """
     flow = Flow.from_client_config(
         _client_config(),
         scopes=GMAIL_SCOPES,
         redirect_uri=GOOGLE_REDIRECT_URI,
-        autogenerate_code_verifier=True,
     )
     auth_url, _ = flow.authorization_url(
         access_type="offline",
@@ -97,19 +102,16 @@ def build_authorization_url() -> tuple[str, str | None]:
         prompt="consent",
         state=create_signed_state(),
     )
-    return auth_url, getattr(flow, "code_verifier", None)
+    return auth_url
 
 
-def exchange_code_for_credentials(*, code: str, state: str, code_verifier: str | None = None):
+def exchange_code_for_credentials(*, code: str, state: str):
     """Validate OAuth state, exchange authorization code, and return credentials."""
     verify_signed_state(state)
-    kwargs = {
-        "scopes": GMAIL_SCOPES,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-    }
-    if code_verifier:
-        kwargs["code_verifier"] = code_verifier
-
-    flow = Flow.from_client_config(_client_config(), **kwargs)
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=GMAIL_SCOPES,
+        redirect_uri=GOOGLE_REDIRECT_URI,
+    )
     flow.fetch_token(code=code)
     return flow.credentials
