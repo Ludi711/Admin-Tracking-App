@@ -83,19 +83,23 @@ def verify_signed_state(state: str, *, max_age_seconds: int = 15 * 60) -> dict[s
     return payload
 
 
-def build_authorization_url() -> str:
-    """Return the Google consent URL.
-
-    For this hosted alpha we intentionally do not use PKCE. This is a server-side
-    OAuth flow using a confidential Web Application client secret stored in
-    Streamlit secrets. Avoiding PKCE removes the Streamlit session-state problem
-    where the code verifier can be lost after redirect.
-    """
-    flow = Flow.from_client_config(
+def _make_flow() -> Flow:
+    # Important: google-auth-oauthlib auto-generates a PKCE code_verifier by default.
+    # Streamlit can lose that verifier across the external Google redirect, causing
+    # "invalid_grant: Missing code verifier". For this hosted alpha we use a normal
+    # confidential web-app flow with the client secret held in Streamlit secrets, so
+    # PKCE is explicitly disabled.
+    return Flow.from_client_config(
         _client_config(),
         scopes=GMAIL_SCOPES,
         redirect_uri=GOOGLE_REDIRECT_URI,
+        autogenerate_code_verifier=False,
     )
+
+
+def build_authorization_url() -> str:
+    """Return the Google consent URL for the hosted Streamlit alpha."""
+    flow = _make_flow()
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -108,10 +112,6 @@ def build_authorization_url() -> str:
 def exchange_code_for_credentials(*, code: str, state: str):
     """Validate OAuth state, exchange authorization code, and return credentials."""
     verify_signed_state(state)
-    flow = Flow.from_client_config(
-        _client_config(),
-        scopes=GMAIL_SCOPES,
-        redirect_uri=GOOGLE_REDIRECT_URI,
-    )
+    flow = _make_flow()
     flow.fetch_token(code=code)
     return flow.credentials
