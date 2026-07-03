@@ -44,8 +44,14 @@ def handle_hosted_oauth_callback() -> int | None:
         st.query_params.clear()
         return None
 
+    code_verifier = st.session_state.get("oauth_code_verifier")
+
     with st.spinner("Finishing Gmail connection..."):
-        creds = exchange_code_for_credentials(code=code, state=state)
+        creds = exchange_code_for_credentials(
+            code=code,
+            state=state,
+            code_verifier=code_verifier,
+        )
         service = build_gmail_service(creds)
         profile = get_gmail_profile(service)
         gmail_address = profile.get("emailAddress")
@@ -55,6 +61,7 @@ def handle_hosted_oauth_callback() -> int | None:
         user_id = get_or_create_user(email=gmail_address, display_name=gmail_address)
         save_credentials_for_user(user_id=user_id, gmail_address=gmail_address, creds=creds)
 
+    st.session_state.pop("oauth_code_verifier", None)
     st.session_state["hosted_user_id"] = user_id
     st.session_state["hosted_gmail_address"] = gmail_address
     st.query_params.clear()
@@ -89,7 +96,9 @@ def render_hosted_login_gate() -> int | None:
         )
         return None
 
-    auth_url = build_authorization_url()
+    auth_url, code_verifier = build_authorization_url()
+    if code_verifier:
+        st.session_state["oauth_code_verifier"] = code_verifier
     st.link_button("Connect Gmail", auth_url, type="primary")
 
     with st.expander("What this alpha can and cannot do"):
@@ -123,6 +132,7 @@ def render_hosted_gmail_scan(user_id: int) -> None:
         if st.button("Reset connection"):
             st.session_state.pop("hosted_user_id", None)
             st.session_state.pop("hosted_gmail_address", None)
+            st.session_state.pop("oauth_code_verifier", None)
             st.rerun()
         return
 
@@ -182,4 +192,5 @@ def render_hosted_gmail_scan(user_id: int) -> None:
     if st.button("Disconnect this browser session"):
         st.session_state.pop("hosted_user_id", None)
         st.session_state.pop("hosted_gmail_address", None)
+        st.session_state.pop("oauth_code_verifier", None)
         st.rerun()
