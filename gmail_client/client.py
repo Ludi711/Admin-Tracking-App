@@ -10,6 +10,9 @@ from googleapiclient.discovery import build
 def build_gmail_service(credentials):
     return build("gmail", "v1", credentials=credentials)
 
+def get_gmail_profile(service) -> dict:
+    """Return the connected Gmail account profile."""
+    return service.users().getProfile(userId="me").execute()
 
 def search_message_ids(service, query: str, max_results: int = 50) -> list[str]:
     response = service.users().messages().list(
